@@ -32,6 +32,8 @@ import paho.mqtt.client as mqtt
 
 from argparse import ArgumentParser
 from inference import Network
+from yoloSupport import YoloParams, parse_yolo_region, intersection_over_union
+from labelMap import labels_map
 
 # MQTT server environment variables
 HOSTNAME = socket.gethostname()
@@ -65,6 +67,9 @@ def build_argparser():
     parser.add_argument("-pt", "--prob_threshold", type=float, default=0.5,
                         help="Probability threshold for detections filtering"
                         "(0.5 by default)")
+    parser.add_argument("-it", "--iou_threshold", default=0.4, type=float,
+                        help="Optional. Intersection over union threshold for overlapping "
+                                                       "detections filtering")
     return parser
 
 
@@ -89,17 +94,20 @@ def infer_on_stream(args, client):
     infer_network = Network()
     # Set Probability threshold for detections
     prob_threshold = args.prob_threshold
+    iou_threshold = args.iou_threshold
 
     ### TODO: Load the model through `infer_network` ###
-    infer_network.load_model(args.m, args.d, args.l)
+    infer_network.load_model(args.model, args.device, args.cpu_extension) # model_path, device, extension
     net_input_shape = infer_network.get_input_shape()
     
     ### TODO: Handle the input stream ###
-    cap = cv2.VideoCapture(args.i)
-    cap.open(args.i)
-    width = int(cap.get(3))
-    height = int(cap.get(4))
-    out = cv2.VideoWriter('out.mp4', 0x00000021, 30, (width, height))
+    cap = cv2.VideoCapture(args.input)
+    #cap.open(args.i)
+    width = int(cap.get(3)) # 768
+    height = int(cap.get(4)) # 432
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+    #fourcc = 0x00000021 # not working since I didn't include it when I compile OpenCV
+    out = cv2.VideoWriter('./resources/out.mp4', fourcc, 30, (width, height))
 
     ### TODO: Loop until stream is over ###
     while cap.isOpened():
@@ -111,19 +119,70 @@ def infer_on_stream(args, client):
         key_pressed = cv2.waitKey(60)
 
         ### TODO: Pre-process the image as needed ###
-        p_frame = cv2.resize(frame, (net_input_shape[3], net_input_shape[2]))
-        p_frame = p_frame.transpose((2,0,1))
-        p_frame = p_frame.reshape(1,*p_frame.shape)
+        request_id = 0
+        in_frame = cv2.resize(frame, (net_input_shape[3], net_input_shape[2]))
+        in_frame = in_frame.transpose((2,0,1))
+        in_frame = in_frame.reshape(1,*in_frame.shape)
 
         ### TODO: Start asynchronous inference for specified request ###
-        infer_network.exec_net(p_frame)
+        infer_network.exec_net(in_frame)
 
         ### TODO: Wait for the result ###
-        if infer_network.wait() == 0:
+
+        # Collecting object detection results
+        objects = list()
+        if infer_network.wait(request_id) == 0:
             ### TODO: Get the results of the inference request ###
-            result = infer_network.get_output()
+            output = infer_network.get_output(request_id)
             ### TODO: Extract any desired stats from the results ###
-            frame = 
+            for layer_name, out_blob in output.items():
+                out_blob = out_blob.reshape(infer_network.network.layers[infer_network.network.layers[layer_name].parents[0]].out_data[0].shape)
+                layer_params = YoloParams(infer_network.network.layers[layer_name].params, out_blob.shape[2])
+                layer_params.log_params()
+                objects += parse_yolo_region(out_blob, in_frame.shape[2:],
+                                             frame.shape[:-1], layer_params,
+                                             prob_threshold)
+            
+        # Filtering overlapping boxes with respect to the --iou_threshold CLI parameter
+        objects = sorted(objects, key=lambda obj : obj['confidence'], reverse=True)
+        for i in range(len(objects)):
+            if objects[i]['confidence'] == 0:
+                continue
+            for j in range(i + 1, len(objects)):
+                if intersection_over_union(objects[i], objects[j]) > iou_threshold:
+                    objects[j]['confidence'] = 0
+
+        # Drawing objects with respect to the --prob_threshold CLI parameter
+        objects = [obj for obj in objects if obj['confidence'] >= prob_threshold]
+
+        if len(objects):
+            print("\nDetected boxes for batch {}:".format(1))
+            print(" Class ID | Confidence | XMIN | YMIN | XMAX | YMAX | COLOR ")
+            
+        origin_im_size = frame.shape[:-1]
+        
+        for obj in objects:
+            # Validation bbox of detected object
+            if obj['xmax'] > origin_im_size[1] or obj['ymax'] > origin_im_size[0] or obj['xmin'] < 0 or obj['ymin'] < 0:
+                continue
+            color = (int(min(obj['class_id'] * 12.5, 255)), min(obj['class_id'] * 7, 255), min(obj['class_id'] * 5, 255))
+            det_label = labels_map[obj['class_id']] if labels_map and len(labels_map) >= obj['class_id'] else str(obj['class_id'])
+            cv2.rectangle(frame, (obj['xmin'], obj['ymin']), (obj['xmax'], obj['ymax']), color, 2)
+            cv2.putText(frame,
+                        "#" + det_label + ' ' + str(round(obj['confidence'] * 100, 1)) + ' %',
+                        (obj['xmin'], obj['ymin'] - 7), cv2.FONT_HERSHEY_COMPLEX, 0.6, color, 1)
+            
+            print("{:^9} | {:10f} | {:4} | {:4} | {:4} | {:4} | {} ".format(
+                det_label, obj['confidence'], obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], color))
+        out.write(frame)
+
+        # ESC key
+        if key_pressed == 27:
+            break
+        
+    out.release()
+    cap.release()
+    cv2.destroyAllWindows()            
             ### TODO: Calculate and send relevant information on ###
             ### current_count, total_count and duration to the MQTT server ###
             ### Topic "person": keys of "count" and "total" ###
@@ -149,5 +208,5 @@ def main():
 
 
 if __name__ == '__main__':
-    #main()
-    client = connect_mqtt()
+    main()
+    # client = connect_mqtt()

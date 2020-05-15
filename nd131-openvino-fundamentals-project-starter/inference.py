@@ -26,9 +26,9 @@ import os
 import sys
 import logging as log
 import cv2
-from math import exp as exp
 from openvino.inference_engine import IENetwork, IECore
-
+from labelMap import labels_map
+from yoloSupport import YoloParams, parse_yolo_region, intersection_over_union
 
 class Network:
     """
@@ -47,7 +47,8 @@ class Network:
         return
 
 
-    def load_model(self, model=os.path.join('/home/sijoonlee/Documents/intel-openvino-projects/yolov3/model','frozen_darknet_yolov3_model.xml'), device = 'CPU', cpu_extenstion=None):
+    def load_model(self, model=os.path.join('/home/sijoonlee/Documents/intel-openvino-projects/yolov3/model',
+                        'frozen_darknet_yolov3_model.xml'), device = 'CPU', cpu_extenstion=None):
         ### TODO: Load the model ###
         model_bin = os.path.splitext(model)[0] + ".bin"
 
@@ -56,8 +57,9 @@ class Network:
         if cpu_extenstion and 'CPU' in device:
             self.plugin.add_extension(cpu_extenstion, 'CPU')
         
-        log.info("Loading network files:\n\t{}\n\t{}".format(model, model_bin))
-        self.network = IENetwork(model = model, weights = model_bin)
+        print("Loading network files:\n\t{}\n\t{}".format(model, model_bin))
+        # self.network = IENetwork(model = model, weights = model_bin) # Deprecation
+        self.network = self.plugin.read_network(model = model, weights = model_bin)
         
         ### TODO: Check for supported layers ###
         if "CPU" in device:
@@ -72,14 +74,20 @@ class Network:
 
         assert len(self.network.inputs.keys()) == 1, "Sample supports only YOLO V3 based single input topologies"
 
-        self.exec_network = self.plugin.load_network(self.network, num_requests=1 ,device_name = device)
         ### TODO: Return the loaded inference plugin ###
+        self.exec_network = self.plugin.load_network(self.network, num_requests=1 ,device_name = device)
+        
+        ### set input/output blob
+        self.input_blob = next(iter(self.network.inputs))
+        self.output_blob = next(iter(self.network.outputs))
+        
         ### Note: You may need to update the function parameters. ###
         return
 
     def get_input_shape(self):
         ### TODO: Return the shape of the input layer ###
-        return self.network.inputs[self.input_blob].shape
+        n, c, h, w = self.network.inputs[self.input_blob].shape
+        return (n, c, h, w)
 
     def exec_net(self, image):
         ### TODO: Start an asynchronous request ###
@@ -88,125 +96,17 @@ class Network:
         self.exec_network.start_async(request_id=0, inputs={self.input_blob: image})
         return
 
-    def wait(self):
+    def wait(self, request_id):
         ### TODO: Wait for the request to be complete. ###
         ### TODO: Return any necessary information ###
         ### Note: You may need to update the function parameters. ###
-        status = self.exec_network.requests[0].wait(-1)
+        status = self.exec_network.requests[request_id].wait(-1)
         return status
 
-    def get_output(self):
+    def get_output(self, request_id):
         ### TODO: Extract and return the output results
         ### Note: You may need to update the function parameters. ###
-        return self.exec_network.requests[0].outputs[self.output_blob]
-
-# def draw_boxes(frame, result, width, height):
-#     for box in result:
-
-
-class YoloParams:
-    # ------------------------------------------- Extracting layer parameters ------------------------------------------
-    # Magic numbers are copied from yolo samples
-    def __init__(self, param, side):
-        self.num = 3 if 'num' not in param else int(param['num'])
-        self.coords = 4 if 'coords' not in param else int(param['coords'])
-        self.classes = 80 if 'classes' not in param else int(param['classes'])
-        self.side = side
-        self.anchors = [10.0, 13.0, 16.0, 30.0, 33.0, 23.0, 30.0, 61.0, 62.0, 45.0, 59.0, 119.0, 116.0, 90.0, 156.0,
-                        198.0,
-                        373.0, 326.0] if 'anchors' not in param else [float(a) for a in param['anchors'].split(',')]
-
-        self.isYoloV3 = False
-
-        if param.get('mask'):
-            mask = [int(idx) for idx in param['mask'].split(',')]
-            self.num = len(mask)
-
-            maskedAnchors = []
-            for idx in mask:
-                maskedAnchors += [self.anchors[idx * 2], self.anchors[idx * 2 + 1]]
-            self.anchors = maskedAnchors
-
-            self.isYoloV3 = True # Weak way to determine but the only one.
-
-    def log_params(self):
-        params_to_print = {'classes': self.classes, 'num': self.num, 'coords': self.coords, 'anchors': self.anchors}
-        [log.info("         {:8}: {}".format(param_name, param)) for param_name, param in params_to_print.items()]
-
-def entry_index(side, coord, classes, location, entry):
-    side_power_2 = side ** 2
-    n = location // side_power_2
-    loc = location % side_power_2
-    return int(side_power_2 * (n * (coord + classes + 1) + entry) + loc)
-
-def scale_bbox(x, y, h, w, class_id, confidence, h_scale, w_scale):
-    xmin = int((x - w / 2) * w_scale)
-    ymin = int((y - h / 2) * h_scale)
-    xmax = int(xmin + w * w_scale)
-    ymax = int(ymin + h * h_scale)
-    return dict(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, class_id=class_id, confidence=confidence)
-
-def parse_yolo_region(blob, resized_image_shape, original_im_shape, params, threshold):
-    # ------------------------------------------ Validating output parameters ------------------------------------------
-    _, _, out_blob_h, out_blob_w = blob.shape
-    assert out_blob_w == out_blob_h, "Invalid size of output blob. It sould be in NCHW layout and height should " \
-                                     "be equal to width. Current height = {}, current width = {}" \
-                                     "".format(out_blob_h, out_blob_w)
-
-    # ------------------------------------------ Extracting layer parameters -------------------------------------------
-    orig_im_h, orig_im_w = original_im_shape
-    resized_image_h, resized_image_w = resized_image_shape
-    objects = list()
-    predictions = blob.flatten()
-    side_square = params.side * params.side
-
-    # ------------------------------------------- Parsing YOLO Region output -------------------------------------------
-    for i in range(side_square):
-        row = i // params.side
-        col = i % params.side
-        for n in range(params.num):
-            obj_index = entry_index(params.side, params.coords, params.classes, n * side_square + i, params.coords)
-            scale = predictions[obj_index]
-            if scale < threshold:
-                continue
-            box_index = entry_index(params.side, params.coords, params.classes, n * side_square + i, 0)
-            # Network produces location predictions in absolute coordinates of feature maps.
-            # Scale it to relative coordinates.
-            x = (col + predictions[box_index + 0 * side_square]) / params.side
-            y = (row + predictions[box_index + 1 * side_square]) / params.side
-            # Value for exp is very big number in some cases so following construction is using here
-            try:
-                w_exp = exp(predictions[box_index + 2 * side_square])
-                h_exp = exp(predictions[box_index + 3 * side_square])
-            except OverflowError:
-                continue
-            # Depends on topology we need to normalize sizes by feature maps (up to YOLOv3) or by input shape (YOLOv3)
-            w = w_exp * params.anchors[2 * n] / (resized_image_w if params.isYoloV3 else params.side)
-            h = h_exp * params.anchors[2 * n + 1] / (resized_image_h if params.isYoloV3 else params.side)
-            for j in range(params.classes):
-                class_index = entry_index(params.side, params.coords, params.classes, n * side_square + i,
-                                          params.coords + 1 + j)
-                confidence = scale * predictions[class_index]
-                if confidence < threshold:
-                    continue
-                objects.append(scale_bbox(x=x, y=y, h=h, w=w, class_id=j, confidence=confidence,
-                                          h_scale=orig_im_h, w_scale=orig_im_w))
-    return objects
-
-def intersection_over_union(box_1, box_2):
-    width_of_overlap_area = min(box_1['xmax'], box_2['xmax']) - max(box_1['xmin'], box_2['xmin'])
-    height_of_overlap_area = min(box_1['ymax'], box_2['ymax']) - max(box_1['ymin'], box_2['ymin'])
-    if width_of_overlap_area < 0 or height_of_overlap_area < 0:
-        area_of_overlap = 0
-    else:
-        area_of_overlap = width_of_overlap_area * height_of_overlap_area
-    box_1_area = (box_1['ymax'] - box_1['ymin']) * (box_1['xmax'] - box_1['xmin'])
-    box_2_area = (box_2['ymax'] - box_2['ymin']) * (box_2['xmax'] - box_2['xmin'])
-    area_of_union = box_1_area + box_2_area - area_of_overlap
-    if area_of_union == 0:
-        return 0
-    return area_of_overlap / area_of_union
-
+        return self.exec_network.requests[request_id].outputs
 
 
 
@@ -218,115 +118,33 @@ if __name__ == '__main__':
     ### TODO: Load the model through `infer_network` ###
     infer_network.load_model()
 
-    infer_network.batch_size = 1
-    infer_network.input_blob = next(iter(infer_network.network.inputs))
-    n, c, h, w = infer_network.network.inputs[infer_network.input_blob].shape
-    infer_network.output_blob = next(iter(infer_network.network.outputs))
-    
+    ## infer_network.batch_size = 1
+    # infer_network.input_blob = next(iter(infer_network.network.inputs))
+    # n, c, h, w = infer_network.network.inputs[infer_network.input_blob].shape
+    # infer_network.output_blob = next(iter(infer_network.network.outputs))
+    n, c, h, w = infer_network.get_input_shape()
 
     # if args.labels:
     #     with open(args.labels, 'r') as f:
     #         labels_map = [x.strip() for x in f]
     # else:
-    labels_map = [
-        'person',
-        'bicycle',
-        'car',
-        'motorbike',
-        'aeroplane',
-        'bus',
-        'train',
-        'truck',
-        'boat',
-        'traffic light',
-        'fire hydrant',
-        'stop sign',
-        'parking meter',
-        'bench',
-        'bird',
-        'cat',
-        'dog',
-        'horse',
-        'sheep',
-        'cow',
-        'elephant',
-        'bear',
-        'zebra',
-        'giraffe',
-        'backpack',
-        'umbrella',
-        'handbag',
-        'tie',
-        'suitcase',
-        'frisbee',
-        'skis',
-        'snowboard',
-        'sports ball',
-        'kite',
-        'baseball bat',
-        'baseball glove',
-        'skateboard',
-        'surfboard',
-        'tennis racket',
-        'bottle',
-        'wine glass',
-        'cup',
-        'fork',
-        'knife',
-        'spoon',
-        'bowl',
-        'banana',
-        'apple',
-        'sandwich',
-        'orange',
-        'broccoli',
-        'carrot',
-        'hot dog',
-        'pizza',
-        'donut',
-        'cake',
-        'chair',
-        'sofa',
-        'pottedplant',
-        'bed',
-        'diningtable',
-        'toilet',
-        'tvmonitor',
-        'laptop',
-        'mouse',
-        'remote',
-        'keyboard',
-        'cell phone',
-        'microwave',
-        'oven',
-        'toaster',
-        'sink',
-        'refrigerator',
-        'book',
-        'clock',
-        'vase',
-        'scissors',
-        'teddy bear',
-        'hair drier',
-        'toothbrush'
-    ]
 
     ### TODO: Handle the input stream ###
-    is_async_mode = True
+    # is_async_mode = True
     
     cap = cv2.VideoCapture('./resources/Pedestrian_Detect_2_1_1.mp4')
     #cap.open('./resources/Pedestrian_Detect_2_1_1.mp4')
 
-    number_input_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) # 1394
-    number_input_frames = 1 if number_input_frames != -1 and number_input_frames < 0 else number_input_frames
+    # number_input_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) # 1394
+    # number_input_frames = 1 if number_input_frames != -1 and number_input_frames < 0 else number_input_frames
 
     # Number of frames in picture is 1 and this will be read in cycle. Sync mode is default value for this case
     wait_key_code = 1
-    if number_input_frames != 1:
-        ret, frame = cap.read()
-    else:
-        is_async_mode = False
-        wait_key_code = 0
+    # if number_input_frames != 1:
+    # ret, frame = cap.read()
+    # else:
+    #     is_async_mode = False
+    #     wait_key_code = 0
 
     width = int(cap.get(3)) # 768
     height = int(cap.get(4)) # 432
@@ -378,7 +196,9 @@ if __name__ == '__main__':
             output = infer_network.exec_network.requests[cur_request_id].outputs
 
             for layer_name, out_blob in output.items():
-                out_blob = out_blob.reshape(infer_network.network.layers[infer_network.network.layers[layer_name].parents[0]].shape)
+                # out_blob = out_blob.reshape(infer_network.network.layers[infer_network.network.layers[layer_name].parents[0]].shape) # Deprecation
+                out_blob = out_blob.reshape(infer_network.network.layers[infer_network.network.layers[layer_name].parents[0]].out_data[0].shape)
+                
                 layer_params = YoloParams(infer_network.network.layers[layer_name].params, out_blob.shape[2])
                 layer_params.log_params()
                 objects += parse_yolo_region(out_blob, in_frame.shape[2:],
