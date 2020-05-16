@@ -161,17 +161,21 @@ def infer_on_stream(args, client):
             
         origin_im_size = frame.shape[:-1]
         
+        person_counter = 0
         for obj in objects:
             # Validation bbox of detected object
             if obj['xmax'] > origin_im_size[1] or obj['ymax'] > origin_im_size[0] or obj['xmin'] < 0 or obj['ymin'] < 0:
                 continue
             color = (int(min(obj['class_id'] * 12.5, 255)), min(obj['class_id'] * 7, 255), min(obj['class_id'] * 5, 255))
             det_label = labels_map[obj['class_id']] if labels_map and len(labels_map) >= obj['class_id'] else str(obj['class_id'])
+            if det_label == 'person':
+                person_counter += 1
             cv2.rectangle(frame, (obj['xmin'], obj['ymin']), (obj['xmax'], obj['ymax']), color, 2)
             cv2.putText(frame,
                         "#" + det_label + ' ' + str(round(obj['confidence'] * 100, 1)) + ' %',
                         (obj['xmin'], obj['ymin'] - 7), cv2.FONT_HERSHEY_COMPLEX, 0.6, color, 1)
             
+            print("# of People: {}", person_counter)
             print("{:^9} | {:10f} | {:4} | {:4} | {:4} | {:4} | {} ".format(
                 det_label, obj['confidence'], obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], color))
         out.write(frame)
@@ -210,3 +214,4 @@ def main():
 if __name__ == '__main__':
     main()
     # client = connect_mqtt()
+    # /usr/bin/python3 /home/sijoonlee/Documents/intel_lot_dev_course/nd131-openvino-fundamentals-project-starter/main.py -m /home/sijoonlee/Documents/intel-openvino-projects/yolov3/model/frozen_darknet_yolov3_model.xml -d CPU -pt 0.8 -it 0.8 -i /home/sijoonlee/Documents/intel_lot_dev_course/nd131-openvino-fundamentals-project-starter//resources/Pedestrian_Detect_2_1_1.mp4
