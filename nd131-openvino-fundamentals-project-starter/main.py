@@ -43,6 +43,15 @@ MQTT_PORT = 3001
 MQTT_KEEPALIVE_INTERVAL = 60
 
 
+DEFAULT_INPUT_VIDEO  = '/home/sijoonlee/Documents/intel_lot_dev_course/nd131-openvino-fundamentals-project-starter/resources/Pedestrian_Detect_2_1_1.mp4'
+DEFAULT_MODEL_PATH = '/home/sijoonlee/Documents/intel-openvino-projects/yolov3/model/frozen_darknet_yolov3_model.xml'
+DEFAULT_CPU_EXTENSION = None
+DEFAULT_DEVICE = 'CPU'
+DEAFULT_PROB_THRESHOLD = 0.7
+DEAFULT_IOU_THRESHOLD = 0.7
+
+SHOW_CONSOLE = False
+
 def build_argparser():
     """
     Parse command line arguments.
@@ -50,24 +59,23 @@ def build_argparser():
     :return: command line arguments
     """
     parser = ArgumentParser()
-    parser.add_argument("-m", "--model", required=True, type=str,
+    parser.add_argument("-m", "--model", type=str, default=DEFAULT_MODEL_PATH,
                         help="Path to an xml file with a trained model.")
-    parser.add_argument("-i", "--input", required=True, type=str,
+    parser.add_argument("-i", "--input", type=str, default=DEFAULT_INPUT_VIDEO,
                         help="Path to image or video file")
-    parser.add_argument("-l", "--cpu_extension", required=False, type=str,
-                        default=None,
+    parser.add_argument("-l", "--cpu_extension", required=False, type=str, default=DEFAULT_CPU_EXTENSION,
                         help="MKLDNN (CPU)-targeted custom layers."
                              "Absolute path to a shared library with the"
                              "kernels impl.")
-    parser.add_argument("-d", "--device", type=str, default="CPU",
+    parser.add_argument("-d", "--device", type=str, default=DEFAULT_DEVICE,
                         help="Specify the target device to infer on: "
                              "CPU, GPU, FPGA or MYRIAD is acceptable. Sample "
                              "will look for a suitable plugin for device "
                              "specified (CPU by default)")
-    parser.add_argument("-pt", "--prob_threshold", type=float, default=0.5,
+    parser.add_argument("-pt", "--prob_threshold", type=float, default=DEAFULT_PROB_THRESHOLD,
                         help="Probability threshold for detections filtering"
                         "(0.5 by default)")
-    parser.add_argument("-it", "--iou_threshold", default=0.4, type=float,
+    parser.add_argument("-it", "--iou_threshold", type=float, default=DEAFULT_IOU_THRESHOLD,
                         help="Optional. Intersection over union threshold for overlapping "
                                                        "detections filtering")
     return parser
@@ -75,8 +83,8 @@ def build_argparser():
 
 def connect_mqtt():
     ### TODO: Connect to the MQTT client ###
-    client = None
-
+    client = mqtt.Client()
+    client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
     return client
 
 
@@ -90,6 +98,7 @@ def infer_on_stream(args, client):
     :param client: MQTT client
     :return: None
     """
+
     # Initialise the class
     infer_network = Network()
     # Set Probability threshold for detections
@@ -102,12 +111,12 @@ def infer_on_stream(args, client):
     
     ### TODO: Handle the input stream ###
     cap = cv2.VideoCapture(args.input)
-    #cap.open(args.i)
-    width = int(cap.get(3)) # 768
-    height = int(cap.get(4)) # 432
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+    cap.open(args.input)
+    #width = int(cap.get(3)) # 768
+    #height = int(cap.get(4)) # 432
+    #fourcc = cv2.VideoWriter_fourcc(*'avc1')
     #fourcc = 0x00000021 # not working since I didn't include it when I compile OpenCV
-    out = cv2.VideoWriter('./resources/out.mp4', fourcc, 30, (width, height))
+    # out = cv2.VideoWriter('./resources/out.mp4', fourcc, 30, (width, height))
 
     ### TODO: Loop until stream is over ###
     while cap.isOpened():
@@ -121,14 +130,13 @@ def infer_on_stream(args, client):
         ### TODO: Pre-process the image as needed ###
         request_id = 0
         in_frame = cv2.resize(frame, (net_input_shape[3], net_input_shape[2]))
-        in_frame = in_frame.transpose((2,0,1))
+        in_frame = in_frame.transpose((2,0,1)) # h,w,c -> c,h,w
         in_frame = in_frame.reshape(1,*in_frame.shape)
 
         ### TODO: Start asynchronous inference for specified request ###
         infer_network.exec_net(in_frame)
 
         ### TODO: Wait for the result ###
-
         # Collecting object detection results
         objects = list()
         if infer_network.wait(request_id) == 0:
@@ -142,7 +150,8 @@ def infer_on_stream(args, client):
                 objects += parse_yolo_region(out_blob, in_frame.shape[2:],
                                              frame.shape[:-1], layer_params,
                                              prob_threshold)
-            
+
+        ### TODO: Calculate and send relevant information on ###            
         # Filtering overlapping boxes with respect to the --iou_threshold CLI parameter
         objects = sorted(objects, key=lambda obj : obj['confidence'], reverse=True)
         for i in range(len(objects)):
@@ -155,13 +164,14 @@ def infer_on_stream(args, client):
         # Drawing objects with respect to the --prob_threshold CLI parameter
         objects = [obj for obj in objects if obj['confidence'] >= prob_threshold]
 
-        if len(objects):
-            print("\nDetected boxes for batch {}:".format(1))
-            print(" Class ID | Confidence | XMIN | YMIN | XMAX | YMAX | COLOR ")
+        if(SHOW_CONSOLE):
+            if len(objects):
+                print("\nDetected boxes for batch {}:".format(1))
+                print(" Class ID | Confidence | XMIN | YMIN | XMAX | YMAX | COLOR ")
             
         origin_im_size = frame.shape[:-1]
         
-        person_counter = 0
+        person_counter_in_frame = 0
         for obj in objects:
             # Validation bbox of detected object
             if obj['xmax'] > origin_im_size[1] or obj['ymax'] > origin_im_size[0] or obj['xmin'] < 0 or obj['ymin'] < 0:
@@ -169,33 +179,39 @@ def infer_on_stream(args, client):
             color = (int(min(obj['class_id'] * 12.5, 255)), min(obj['class_id'] * 7, 255), min(obj['class_id'] * 5, 255))
             det_label = labels_map[obj['class_id']] if labels_map and len(labels_map) >= obj['class_id'] else str(obj['class_id'])
             if det_label == 'person':
-                person_counter += 1
+                person_counter_in_frame += 1
             cv2.rectangle(frame, (obj['xmin'], obj['ymin']), (obj['xmax'], obj['ymax']), color, 2)
             cv2.putText(frame,
                         "#" + det_label + ' ' + str(round(obj['confidence'] * 100, 1)) + ' %',
                         (obj['xmin'], obj['ymin'] - 7), cv2.FONT_HERSHEY_COMPLEX, 0.6, color, 1)
             
-            print("# of People: {}", person_counter)
-            print("{:^9} | {:10f} | {:4} | {:4} | {:4} | {:4} | {} ".format(
-                det_label, obj['confidence'], obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], color))
-        out.write(frame)
+            if(SHOW_CONSOLE):
+                print("# of People: {}", person_counter_in_frame)
+                print("{:^9} | {:10f} | {:4} | {:4} | {:4} | {:4} | {} ".format(
+                    det_label, obj['confidence'], obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], color))
+        
+        # out.write(frame)
+
+        ### TODO: Send signal to MQTT server
+        ### current_count, total_count and duration to the MQTT server ###
+        ### Topic "person": keys of "count" and "total" ###
+        ### Topic "person/duration": key of "duration" ###
+        client.publish('person', json.dumps({"count":person_counter_in_frame, "total":0}))
+        client.publish('person/duration', json.dumps({"duration":0}))
 
         # ESC key
         if key_pressed == 27:
             break
-        
-    out.release()
-    cap.release()
-    cv2.destroyAllWindows()            
-            ### TODO: Calculate and send relevant information on ###
-            ### current_count, total_count and duration to the MQTT server ###
-            ### Topic "person": keys of "count" and "total" ###
-            ### Topic "person/duration": key of "duration" ###
 
         ### TODO: Send the frame to the FFMPEG server ###
-
+        sys.stdout.buffer.write(frame)
+        sys.stdout.flush()
         ### TODO: Write an output image if `single_image_mode` ###
 
+    #out.release()
+    cap.release()
+    cv2.destroyAllWindows()
+    client.disconnect()            
 
 def main():
     """
@@ -213,5 +229,8 @@ def main():
 
 if __name__ == '__main__':
     main()
-    # client = connect_mqtt()
-    # /usr/bin/python3 /home/sijoonlee/Documents/intel_lot_dev_course/nd131-openvino-fundamentals-project-starter/main.py -m /home/sijoonlee/Documents/intel-openvino-projects/yolov3/model/frozen_darknet_yolov3_model.xml -d CPU -pt 0.8 -it 0.8 -i /home/sijoonlee/Documents/intel_lot_dev_course/nd131-openvino-fundamentals-project-starter//resources/Pedestrian_Detect_2_1_1.mp4
+
+    # sudo ffserver -f ./ffmpeg/server.conf
+    # node ./server.js
+    # npm run dev
+    # python3 main.py | ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 768x432 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm

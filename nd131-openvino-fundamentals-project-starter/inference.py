@@ -57,7 +57,7 @@ class Network:
         if cpu_extenstion and 'CPU' in device:
             self.plugin.add_extension(cpu_extenstion, 'CPU')
         
-        print("Loading network files:\n\t{}\n\t{}".format(model, model_bin))
+        # print("Loading network files:\n\t{}\n\t{}".format(model, model_bin))
         # self.network = IENetwork(model = model, weights = model_bin) # Deprecation
         self.network = self.plugin.read_network(model = model, weights = model_bin)
         
