@@ -34,6 +34,7 @@ from argparse import ArgumentParser
 from inference import Network
 from yoloSupport import YoloParams, parse_yolo_region, intersection_over_union
 from labelMap import labels_map
+from centroidTracker import Tracker
 
 # MQTT server environment variables
 HOSTNAME = socket.gethostname()
@@ -47,7 +48,7 @@ DEFAULT_INPUT_VIDEO  = '/home/sijoonlee/Documents/intel_lot_dev_course/nd131-ope
 DEFAULT_MODEL_PATH = '/home/sijoonlee/Documents/intel-openvino-projects/yolov3/model/frozen_darknet_yolov3_model.xml'
 DEFAULT_CPU_EXTENSION = None
 DEFAULT_DEVICE = 'CPU'
-DEAFULT_PROB_THRESHOLD = 0.7
+DEAFULT_PROB_THRESHOLD = 0.6
 DEAFULT_IOU_THRESHOLD = 0.7
 
 SHOW_CONSOLE = False
@@ -78,6 +79,8 @@ def build_argparser():
     parser.add_argument("-it", "--iou_threshold", type=float, default=DEAFULT_IOU_THRESHOLD,
                         help="Optional. Intersection over union threshold for overlapping "
                                                        "detections filtering")
+    parser.add_argument("-s", "--save_video", type=str, default=False,
+                        help="Optional. Provide the file name for the video if you want to save")
     return parser
 
 
@@ -86,8 +89,6 @@ def connect_mqtt():
     client = mqtt.Client()
     client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
     return client
-
-
 
 def infer_on_stream(args, client):
     """
@@ -112,11 +113,11 @@ def infer_on_stream(args, client):
     ### TODO: Handle the input stream ###
     cap = cv2.VideoCapture(args.input)
     cap.open(args.input)
-    #width = int(cap.get(3)) # 768
-    #height = int(cap.get(4)) # 432
-    #fourcc = cv2.VideoWriter_fourcc(*'avc1')
-    #fourcc = 0x00000021 # not working since I didn't include it when I compile OpenCV
-    # out = cv2.VideoWriter('./resources/out.mp4', fourcc, 30, (width, height))
+
+    ### TODO: perpare object tracker
+    number_input_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) # 1394
+    tracker = Tracker(number_input_frames)
+
 
     ### TODO: Loop until stream is over ###
     while cap.isOpened():
@@ -166,31 +167,31 @@ def infer_on_stream(args, client):
 
         if(SHOW_CONSOLE):
             if len(objects):
-                print("\nDetected boxes for batch {}:".format(1))
                 print(" Class ID | Confidence | XMIN | YMIN | XMAX | YMAX | COLOR ")
             
         origin_im_size = frame.shape[:-1]
         
-        person_counter_in_frame = 0
+        
         for obj in objects:
             # Validation bbox of detected object
             if obj['xmax'] > origin_im_size[1] or obj['ymax'] > origin_im_size[0] or obj['xmin'] < 0 or obj['ymin'] < 0:
                 continue
             color = (int(min(obj['class_id'] * 12.5, 255)), min(obj['class_id'] * 7, 255), min(obj['class_id'] * 5, 255))
             det_label = labels_map[obj['class_id']] if labels_map and len(labels_map) >= obj['class_id'] else str(obj['class_id'])
-            if det_label == 'person':
-                person_counter_in_frame += 1
             cv2.rectangle(frame, (obj['xmin'], obj['ymin']), (obj['xmax'], obj['ymax']), color, 2)
             cv2.putText(frame,
                         "#" + det_label + ' ' + str(round(obj['confidence'] * 100, 1)) + ' %',
                         (obj['xmin'], obj['ymin'] - 7), cv2.FONT_HERSHEY_COMPLEX, 0.6, color, 1)
-            
+
             if(SHOW_CONSOLE):
-                print("# of People: {}", person_counter_in_frame)
                 print("{:^9} | {:10f} | {:4} | {:4} | {:4} | {:4} | {} ".format(
                     det_label, obj['confidence'], obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], color))
         
-        # out.write(frame)
+        ### TODO: object tracker
+        tracker.updateFrame(objects)
+        person_counter_in_frame = tracker.getNumberOfPeopleInFrame()
+        tracker.increateFrameCounter()
+
 
         ### TODO: Send signal to MQTT server
         ### current_count, total_count and duration to the MQTT server ###
@@ -207,8 +208,7 @@ def infer_on_stream(args, client):
         sys.stdout.buffer.write(frame)
         sys.stdout.flush()
         ### TODO: Write an output image if `single_image_mode` ###
-
-    #out.release()
+    
     cap.release()
     cv2.destroyAllWindows()
     client.disconnect()            
@@ -233,4 +233,4 @@ if __name__ == '__main__':
     # sudo ffserver -f ./ffmpeg/server.conf
     # node ./server.js
     # npm run dev
-    # python3 main.py | ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 768x432 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm
+    # python3 main.py -s output.mp4 | ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 768x432 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm
