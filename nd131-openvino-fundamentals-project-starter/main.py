@@ -34,7 +34,7 @@ from argparse import ArgumentParser
 from inference import Network
 from yoloSupport import YoloParams, parse_yolo_region, intersection_over_union
 from labelMap import labels_map
-from centroidTracker import Tracker
+from similarityTracker import Tracker
 
 # MQTT server environment variables
 HOSTNAME = socket.gethostname()
@@ -79,7 +79,7 @@ def build_argparser():
     parser.add_argument("-it", "--iou_threshold", type=float, default=DEAFULT_IOU_THRESHOLD,
                         help="Optional. Intersection over union threshold for overlapping "
                                                        "detections filtering")
-    parser.add_argument("-s", "--save_video", type=str, default=False,
+    parser.add_argument("-s", "--save_video", type=str, default="",
                         help="Optional. Provide the file name for the video if you want to save")
     return parser
 
@@ -118,10 +118,17 @@ def infer_on_stream(args, client):
     number_input_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) # 1394
     tracker = Tracker(number_input_frames)
 
+    out = None
+    ### Saving video feature
+    if(len(args.save_video)):
+        width = int(cap.get(3)) # 768
+        height = int(cap.get(4)) # 432
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
+        #fourcc = 0x00000021 # not working since I didn't include it when I compile OpenCV
+        out = cv2.VideoWriter('./resources/out.mp4', fourcc, 30, (width, height))
 
     ### TODO: Loop until stream is over ###
     while cap.isOpened():
-        
         ### TODO: Read from the video capture ###
         flag, frame = cap.read()
         if not flag:
@@ -188,27 +195,32 @@ def infer_on_stream(args, client):
                     det_label, obj['confidence'], obj['xmin'], obj['ymin'], obj['xmax'], obj['ymax'], color))
         
         ### TODO: object tracker
-        tracker.updateFrame(objects)
-        person_counter_in_frame = tracker.getNumberOfPeopleInFrame()
-        tracker.increateFrameCounter()
-
+        if SHOW_CONSOLE:
+            print(objects)
+        counts_in_frame, total_counts = tracker.run(objects)
 
         ### TODO: Send signal to MQTT server
         ### current_count, total_count and duration to the MQTT server ###
         ### Topic "person": keys of "count" and "total" ###
         ### Topic "person/duration": key of "duration" ###
-        client.publish('person', json.dumps({"count":person_counter_in_frame, "total":0}))
+        client.publish('person', json.dumps({"count": counts_in_frame, "total":total_counts}))
         client.publish('person/duration', json.dumps({"duration":0}))
 
         # ESC key
         if key_pressed == 27:
             break
+        
+        ### save video feature
+        if out is not None:
+            out.write(frame)
 
         ### TODO: Send the frame to the FFMPEG server ###
         sys.stdout.buffer.write(frame)
         sys.stdout.flush()
         ### TODO: Write an output image if `single_image_mode` ###
     
+    if out is not None:
+        out.release()
     cap.release()
     cv2.destroyAllWindows()
     client.disconnect()            
@@ -234,3 +246,4 @@ if __name__ == '__main__':
     # node ./server.js
     # npm run dev
     # python3 main.py -s output.mp4 | ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 768x432 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm
+    # python3 main.py | ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 768x432 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm
