@@ -113,7 +113,7 @@ def infer_on_stream(args, client):
     ### TODO: Handle the input stream ###
     cap = cv2.VideoCapture(args.input)
     cap.open(args.input)
-
+    fps = cap.get(cv2.CAP_PROP_FPS)
     ### TODO: perpare object tracker
     number_input_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) # 1394
     tracker = Tracker(number_input_frames)
@@ -197,14 +197,15 @@ def infer_on_stream(args, client):
         ### TODO: object tracker
         if SHOW_CONSOLE:
             print(objects)
-        counts_in_frame, total_counts = tracker.run(objects)
+        counts_in_frame, total_counts, frames_people_spent = tracker.run(objects)
+        seconds_people_spent = frames_people_spent / fps
 
         ### TODO: Send signal to MQTT server
         ### current_count, total_count and duration to the MQTT server ###
         ### Topic "person": keys of "count" and "total" ###
         ### Topic "person/duration": key of "duration" ###
         client.publish('person', json.dumps({"count": counts_in_frame, "total":total_counts}))
-        client.publish('person/duration', json.dumps({"duration":0}))
+        client.publish('person/duration', json.dumps({"duration":seconds_people_spent}))
 
         # ESC key
         if key_pressed == 27:

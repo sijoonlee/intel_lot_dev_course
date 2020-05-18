@@ -14,7 +14,8 @@ class Tracker:
         self.totalNumberOfPeople = 0
 
         self.frameHistory = [None] * numberOfFrames
-        self.uniqueIDs = set()
+        self.durationDict = collections.defaultdict(float)
+
 
     def setTolerance(self, tolerance):
         self.lostTolerance = tolerance
@@ -28,11 +29,20 @@ class Tracker:
         else:
             return 0
         
+    def countFramesPeopleInScreenSpent(self):
+        framesSpent = 0
+        if self.frameHistory[self.currentFrame] != None:
+            for frameData in self.frameHistory[self.currentFrame]:
+                trackID = frameData.get('trackID')
+                duration = self.durationDict.get(trackID)
+                framesSpent += duration
+        return framesSpent
+
     def updateFrame(self, objects):
         objInFrame = []
         for obj in objects:
             if(obj.get('class_id')==CLASS_ID_PERSON):
-                objInFrame.append({'trackID':self.trackID, 'xmin':obj['xmin'], 'ymin':obj['ymin'], 'xmax':obj['xmax'], 'ymax': obj['ymax']})
+                objInFrame.append({'trackID':self.trackID, 'xmin':obj['xmin'], 'ymin':obj['ymin'], 'xmax':obj['xmax'], 'ymax': obj['ymax'], 'duration':0})
                 self.trackID += 1
 
         self.frameHistory[self.currentFrame] = objInFrame
@@ -78,7 +88,7 @@ class Tracker:
 
     def findSimilarityWithTolerance(self):
         if self.frameHistory[self.currentFrame] == None or len(self.frameHistory[self.currentFrame]) == 0:
-            return False, False, False, False
+            return None, None, None, None, None
 
         def findIndex():
             for i in range(1, self.lostTolerance):
@@ -94,32 +104,39 @@ class Tracker:
 
         if foundIndex is not False:
             pairs, new, lost = self.findSimilarity(self.currentFrame, foundIndex)
-            return pairs, new, lost, foundIndex
+            duration = self.currentFrame - foundIndex + 1
+            return pairs, new, lost, foundIndex, duration
         else:
-            return False, False, False, False        
+            return False, False, False, False, False        
 
-    def updateTrackID(self, pairs, foundIndex):
+    def updateTrackID(self, pairs, foundIndex, duration):
         for pair in pairs:
             if pair.similarity > self.similaritytolerance:
                 trackID = self.frameHistory[foundIndex][pair.previous].get('trackID')
+                previousDuartion = self.frameHistory[foundIndex][pair.previous].get('duration')
                 self.frameHistory[self.currentFrame][pair.current]['trackID'] = trackID
                 self.frameHistory[self.currentFrame][pair.current]['similarity'] = pair.similarity
+                self.frameHistory[self.currentFrame][pair.current]['duration'] = duration + previousDuartion
                 if SHOW_CONSOLE:
                     print("Updated: ", self.frameHistory[self.currentFrame][pair.current])
 
-    def updateUniqueIDs(self):
+    def updateDurations(self):
         for obj in self.frameHistory[self.currentFrame]:
-            self.uniqueIDs.add(obj.get('trackID'))
+            self.durationDict[obj.get('trackID')] = obj.get('duration')
         
     def countTotalIDs(self):
-        return len(self.uniqueIDs)
+        return len(self.durationDict)
         
     def update(self, objects):
         self.updateFrame(objects)
-        pairs, _, _, foundIndex = self.findSimilarityWithTolerance()
-        if pairs is not False:
-            self.updateTrackID(pairs, foundIndex)
-            self.updateUniqueIDs()
+        pairs, _, _, foundIndex, duration = self.findSimilarityWithTolerance()
+        if foundIndex is not None:
+            if foundIndex is not False:
+                self.updateTrackID(pairs, foundIndex, duration)
+                self.updateDurations()
+            else:
+                self.updateDurations()
+
         if SHOW_CONSOLE:
             print("Current Frame: ", self.frameHistory[self.currentFrame])        
 
@@ -127,8 +144,9 @@ class Tracker:
         self.update(objects)
         counts_in_frame = self.countPeopleInFrame()
         total_counts = self.countTotalIDs()
+        total_frames = self.countFramesPeopleInScreenSpent()
         self.increateFrameCounter()
-        return counts_in_frame, total_counts
+        return counts_in_frame, total_counts, total_frames
 
 if __name__ == '__main__':
     tracker = Tracker(100)
@@ -158,21 +176,23 @@ if __name__ == '__main__':
     tracker.run(frameBlank)
     tracker.run(frameBlank)
     tracker.run(frameBlank)
-    tracker.run(frameBlank)
-    tracker.run(frameTestOne)
+    print(tracker.run(frameBlank))
+    print("----")
+    print(tracker.run(frameTestOne))
+    print("----")
     tracker.run(frameBlank)
     tracker.run(frameBlank)
     tracker.run(frameTestTwo)
     tracker.run(frameTestThree)
-    tracker.run(frameBlank)
-    tracker.run(frameBlank)
-    tracker.run(frameBlank)
-    tracker.run(frameBlank)
-    tracker.run(frameBlank)
-    tracker.run(frameBlank)
-    tracker.run(frameBlank)
+    tracker.run(frameTestOne)
+    tracker.run(frameTestOne)
     tracker.run(frameBlank)
     tracker.run(frameBlank)
     tracker.run(frameBlank)
     tracker.run(frameTestOne)
+    tracker.run(frameBlank)
+    tracker.run(frameBlank)
+    tracker.run(frameBlank)
+    tracker.run(frameTestTwo)
+    print(tracker.run(frameTestTwo))
 
