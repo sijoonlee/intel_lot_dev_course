@@ -7,53 +7,53 @@ questions.
 ## Explaining Custom Layers
 
 The process behind converting custom layers involves...
+(ANSWER)   
+1. Building model  
+2. Creating the custom layer  
+  - generate the extension template files using the model extension generator(one of the deployment tools)  
+3. Generating IR files
+  - use model optimizer
+4. Executing the model with the custom layer(as extension)
 
-Some of the potential reasons for handling custom layers are...
+The poteintial reasons for handling custom layers in a trained model
+(ANSWER)   
+Customized layer would be needed for experimental or newly developed activation functions
+
 
 ## Comparing Model Performance
 
 My method(s) to compare models before and after conversion to Intermediate Representations
 were...
+(ANSWER) Compaing the amount of time and the level of accuracy of inference
 
 The difference between model accuracy pre- and post-conversion was...
+(ANSWER)
 
 The size of the model pre- and post-conversion was...
+(ANSWER)
 
 The inference time of the model pre- and post-conversion was...
-
+(ANSWER)
+  
 ## Assess Model Use Cases
 
 Some of the potential use cases of the people counter app are...
+(ANSWER) Class attendence checking app  
 
 Each of these use cases would be useful because...
+(ANSWER) it would decrease the amount of time required for teachers to check the attendence
 
 ## Assess Effects on End User Needs
 
 Lighting, model accuracy, and camera focal length/image size have different effects on a
-deployed edge model. The potential effects of each of these are as follows...
-
-## Model Research
-
-[This heading is only required if a suitable model was not found after trying out at least three
-different models. However, you may also use this heading to detail how you converted 
-a successful model.]
-
-In investigating potential people counter models, I tried each of the following three models:
-
-- Model 1: [Name]
-  - [Model Source]
-  - I converted the model to an Intermediate Representation with the following arguments...
-  - The model was insufficient for the app because...
-  - I tried to improve the model for the app by...
-  
-- Model 2: [Name]
-  - [Model Source]
-  - I converted the model to an Intermediate Representation with the following arguments...
-  - The model was insufficient for the app because...
-  - I tried to improve the model for the app by...
-
-- Model 3: [Name]
-  - [Model Source]
-  - I converted the model to an Intermediate Representation with the following arguments...
-  - The model was insufficient for the app because...
-  - I tried to improve the model for the app by...
+deployed edge model. The potential effects of each of these are as follows...  
+(ANSWER)
+The constraints that the model is trained upon would affect the model's effectiveness for end-users
+For example, if users need to use the model with a camera that is around 50 meters away from objects,  
+it would be effective if using the model trained on such a constraint. 
+For other instance, if the model is not trained properly on dark images,  
+it would be no use for night-time images or video streams
+Last but not least, image size and model accuracy are closely related with the speed of inference.  
+If the model is for a scientific research that is required to be very precise, it would be better to use  
+the moddel with large image and high level accuracy. On the other hand, if the model is for a simple  
+task that doesn't need to be precise, it doesn't need large size of image input nor high accuracy.
