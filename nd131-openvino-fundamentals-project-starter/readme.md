@@ -2,7 +2,10 @@
 
 # Project 1 - Deploy a People Counter App
 
-## Reference 
+[**WRITEUP**](https://github.com/sijoonlee/intel_lot_dev_course/blob/master/nd131-openvino-fundamentals-project-starter/WRITEUP.md)  
+
+
+### Reference and how-to
 1. [How to Install OpenCV3 on Ubuntu 18.04](https://linuxize.com/post/how-to-install-opencv-on-ubuntu-18-04/)  
 ```
 sudo apt install build-essential cmake git pkg-config libgtk-3-dev \
@@ -55,6 +58,5 @@ python3 /opt/intel/openvino_2020.2.120/deployment_tools/model_optimizer/mo_tf.py
 ```
 4. [Udacity's Stater Code](https://github.com/udacity/nd131-openvino-fundamentals-project-starter)  
 
-5. [Intel's object_detection_demo_yolov3_async](https://github.com/sijoonlee/intel_lot_dev_course/tree/master/nd131-openvino-fundamentals-project-starter/object_detection_demo_yolov3_async)
+5. and [more references](https://github.com/arunponnusamy/object-detection-opencv)
 
-# 
