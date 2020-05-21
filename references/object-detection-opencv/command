@@ -1,0 +1,2 @@
+python3 yolo_opencv_cv2.py --image dog.jpg --config yolov3.cfg --weights yolov3.weights --classes coco.names
+python3 yolo_opencv_intel.py --image dog.jpg --classes coco.names

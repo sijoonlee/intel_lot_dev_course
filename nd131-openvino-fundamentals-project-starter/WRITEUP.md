@@ -24,16 +24,41 @@ Customized layer would be needed for experimental or newly developed activation 
 
 My method(s) to compare models before and after conversion to Intermediate Representations
 were...
-(ANSWER) Compaing the amount of time and the level of accuracy of inference
+(ANSWER) 
+It is to compare the amount of time and the level of accuracy of inference.  
+For pre-conversion model, I used OpenCV's yolov3 support with the same weight that I have used for this project.  
+And performed a simple task to predict classes and draw binding boxes in a single image.  
+The result is below
+
+ 
+|          |Intel OpenVINO      | OpenCV yolov3 support|
+|----------|--------------------|----------------------|
+|Class     | Confidence         | Confidence           |
+|dog       |   0.998923         | 0.99790170           |
+|bicycle   |   0.996617         | 0.99009365           |
+|truck     |   0.927796         | 0.93702490           |
+|Time Spent|   1.65             | 1.99                 |
+
 
 The difference between model accuracy pre- and post-conversion was...
 (ANSWER)
+In term of accuracy, pre-conversion and post-conversion predicts very well - both of them made right prediction for each class - dog, bicycle, truck.  
 
-The size of the model pre- and post-conversion was...
-(ANSWER)
+However, the precision of confidence has decreased after convesion.
+For example, OpenCV's yolov3 model produced 8 precision
+On the other hand, OpenVINO model produced 6 precision
+
+The size of the model pre- and post-conversion was...  
+(ANSWER)  
+Pretrained Yolov3 weight file : 248,007,048 bytes  
+Post-conversion model : 247,691,416 bytes  
+The file size is decreased down, but really small difference  
 
 The inference time of the model pre- and post-conversion was...
-(ANSWER)
+(ANSWER)  
+pre-conversion : 1.99 (s)  
+post-conversion: 1.65 (s)  
+It's about 17% decrease  
   
 ## Assess Model Use Cases
 
